@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which Country? / Capitals</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--ink:#101a2c;--panel:#18263d;--line:#2c3e5e;--text:#eaf0f7;--dim:#93a4bd;--gold:#ffcb47;--good:#4cc38a;--bad:#ff6b6b}
+*{box-sizing:border-box;cursor:url(cursor.cur),auto}
+button,.btn,a,summary{cursor:url(pointer.cur),pointer}
+input{cursor:url(cursor.cur),text}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--text);font:16px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif}
+h1,h2{font-family:Georgia,"Times New Roman",serif;margin:0 0 .4em;font-weight:700}
+h1{font-size:clamp(2rem,6vw,3.2rem);line-height:1.05}
+.screen{display:none;min-height:100%;padding:24px;align-items:center;justify-content:center}
+.screen.on{display:flex}
+.card{width:100%;max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px}
+.card.wide{max-width:600px}
+p{color:var(--dim);margin:.2em 0 1em}
+input{width:100%;padding:12px 14px;margin:0 0 12px;border-radius:8px;border:1px solid var(--line);background:var(--ink);color:var(--text);font:inherit}
+input:focus,button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+button{padding:12px 20px;border:0;border-radius:8px;background:var(--gold);color:#241a00;font:inherit;font-weight:700}
+button.alt{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:hover{filter:brightness(1.1)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.err{color:var(--bad);min-height:1.5em;margin:0 0 6px}
+#game{position:relative;padding:0}
+#map{position:absolute;inset:0;background:#d0d8e0}
+#flagArea{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#1a2a44,#0d1626)}
+#flagImg{max-width:min(70vw,420px);max-height:50vh;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,.5);border:3px solid var(--line)}
+.top,.bottom{position:absolute;left:0;right:0;z-index:1000;display:flex;gap:12px;align-items:center;padding:12px 16px;background:rgba(16,26,44,.92);backdrop-filter:blur(6px)}
+.top{top:0;justify-content:space-between}
+.bottom{bottom:0}
+.bottom input{margin:0;flex:1}
+#time{font:700 1.5rem Georgia,serif;color:var(--gold)}
+#time.low{color:var(--bad)}
+#over{position:absolute;inset:0;z-index:1001;background:rgba(16,26,44,.92);display:none;align-items:center;justify-content:center;padding:24px;text-align:center}
+#over.on{display:flex}
+.ok{color:var(--good)}.no{color:var(--bad)}
+ul{list-style:none;padding:0;margin:12px 0}
+li{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+li small{color:var(--dim);display:block}
+.mark{font-weight:700}
+.leaflet-container{font:inherit;background:#d0d8e0}
+.leaflet-control-zoom a{background:var(--panel)!important;color:var(--text)!important;border-color:var(--line)!important}
+.leaflet-control-attribution{background:rgba(16,26,44,.7)!important;color:var(--dim)!important;font-size:10px}
+.pin-hint{position:absolute;top:58px;left:50%;transform:translateX(-50%);z-index:999;background:rgba(16,26,44,.85);padding:6px 14px;border-radius:20px;font-size:13px;color:var(--dim);pointer-events:none;white-space:nowrap}
+.mode-btn{flex:1;min-width:140px;text-align:center}
+.mode-btn small{display:block;font-weight:400;font-size:12px;opacity:.8;margin-top:2px}
+</style>
+</head>
+<body>
+
+<section id="auth" class="screen on"><div class="card">
+  <h1>Country Games</h1>
+  <p>Map mode or Capitals mode. Sign in to save your scores.</p>
+  <input id="u" placeholder="Name" autocomplete="username">
+  <input id="p" type="password" placeholder="Password" autocomplete="current-password">
+  <div class="err" id="aerr"></div>
+  <div class="row"><button id="in">Sign in</button><button class="alt" id="up">Sign up</button></div>
+</div></section>
+
+<section id="menu" class="screen"><div class="card wide">
+  <h2>Hi, <span id="who"></span></h2>
+  <p>Choose a mode · 5 rounds · 2 minutes each · 1 point per correct answer</p>
+  <div class="row" style="margin-top:16px">
+    <button class="mode-btn" id="startMap">Map mode<small>Pin on map → guess country</small></button>
+    <button class="mode-btn" id="startCapitals">Capitals mode<small>See flag → guess capital</small></button>
+  </div>
+  <div class="row" style="margin-top:12px"><button class="alt" id="out">Sign out</button></div>
+  <h2 style="margin-top:28px;font-size:1.2rem">Your last games</h2>
+  <div id="hist"></div>
+</div></section>
+
+<section id="game" class="screen">
+  <div id="map"></div>
+  <div id="flagArea" style="display:none"><img id="flagImg" alt="Flag"></div>
+  <div class="pin-hint" id="hint">📍 Pin is fixed — drag &amp; scroll the map (no names shown)</div>
+  <div class="top"><span id="rnd"></span><span id="time">2:00</span><span id="pts"></span></div>
+  <div class="bottom">
+    <input id="guess" placeholder="Type your answer…" autocomplete="off">
+    <button id="send">Guess</button>
+  </div>
+  <div id="over"><div class="card"><div id="overMsg"></div><div class="row" style="justify-content:center"><button id="next">Next</button></div></div></div>
+</section>
+
+<section id="end" class="screen"><div class="card wide">
+  <h2>Game over: <span id="fin"></span> / 5</h2>
+  <ul id="sum"></ul>
+  <div class="row"><button id="again">Play again</button><button class="alt" id="home">Menu</button></div>
+</div></section>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let token = localStorage.getItem('tok'), name = localStorage.getItem('name');
+let mode = 'map'; // 'map' or 'capitals'
+
+function show(id){ document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+
+async function api(path, body){
+  const r = await fetch('/api/' + path, {
+    method: body ? 'POST' : 'GET',
+    headers: {'Content-Type':'application/json', Authorization:'Bearer ' + token},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || 'Something went wrong.');
+  return j;
+}
+
+/* ---------- accounts ---------- */
+async function authGo(kind){
+  try {
+    const j = await api(kind, {name: $('u').value, password: $('p').value});
+    token = j.token; name = j.name;
+    localStorage.setItem('tok', token); localStorage.setItem('name', name);
+    openMenu();
+  } catch(e){ $('aerr').textContent = e.message; }
+}
+$('in').onclick = () => authGo('signin');
+$('up').onclick = () => authGo('signup');
+$('out').onclick = () => { localStorage.clear(); token = name = null; show('auth'); };
+$('home').onclick = openMenu;
+
+async function openMenu(){
+  $('who').textContent = name; show('menu');
+  try {
+    const g = await api('games');
+    $('hist').innerHTML = g.length ? g.map(x =>
+      `<li><span>${new Date(x.date).toLocaleString()} · ${x.mode||'map'}</span><b>${x.score} / 5</b></li>`).join('')
+      : '<p>No games yet.</p>';
+  } catch(e){ show('auth'); }
+}
+if (token) openMenu();
+
+/* ---------- data ---------- */
+const COUNTRIES = [
+  {name:'Afghanistan',capital:'Kabul',code:'af',lat:34.5,lng:69.2},
+  {name:'Albania',capital:'Tirana',code:'al',lat:41.3,lng:19.8},
+  {name:'Algeria',capital:'Algiers',code:'dz',lat:36.8,lng:3.0},
+  {name:'Angola',capital:'Luanda',code:'ao',lat:-8.8,lng:13.2},
+  {name:'Argentina',capital:'Buenos Aires',code:'ar',lat:-34.6,lng:-58.4},
+  {name:'Armenia',capital:'Yerevan',code:'am',lat:40.2,lng:44.5},
+  {name:'Australia',capital:'Canberra',code:'au',lat:-35.3,lng:149.1},
+  {name:'Austria',capital:'Vienna',code:'at',lat:48.2,lng:16.4},
+  {name:'Azerbaijan',capital:'Baku',code:'az',lat:40.4,lng:49.9},
+  {name:'Bangladesh',capital:'Dhaka',code:'bd',lat:23.8,lng:90.4},
+  {name:'Belarus',capital:'Minsk',code:'by',lat:53.9,lng:27.6},
+  {name:'Belgium',capital:'Brussels',code:'be',lat:50.9,lng:4.4},
+  {name:'Benin',capital:'Porto-Novo',code:'bj',lat:6.5,lng:2.6},
+  {name:'Bolivia',capital:'Sucre',code:'bo',lat:-16.5,lng:-68.1},
+  {name:'Bosnia and Herzegovina',capital:'Sarajevo',code:'ba',lat:43.9,lng:18.4},
+  {name:'Botswana',capital:'Gaborone',code:'bw',lat:-24.7,lng:25.9},
+  {name:'Brazil',capital:'Brasília',code:'br',lat:-15.8,lng:-47.9},
+  {name:'Bulgaria',capital:'Sofia',code:'bg',lat:42.7,lng:23.3},
+  {name:'Burkina Faso',capital:'Ouagadougou',code:'bf',lat:12.4,lng:-1.5},
+  {name:'Burundi',capital:'Gitega',code:'bi',lat:-3.4,lng:29.4},
+  {name:'Cambodia',capital:'Phnom Penh',code:'kh',lat:11.6,lng:104.9},
+  {name:'Cameroon',capital:'Yaoundé',code:'cm',lat:3.9,lng:11.5},
+  {name:'Canada',capital:'Ottawa',code:'ca',lat:45.4,lng:-75.7},
+  {name:'Central African Republic',capital:'Bangui',code:'cf',lat:4.4,lng:18.6},
+  {name:'Chad',capital:"N'Djamena",code:'td',lat:12.1,lng:15.0},
+  {name:'Chile',capital:'Santiago',code:'cl',lat:-33.4,lng:-70.7},
+  {name:'China',capital:'Beijing',code:'cn',lat:39.9,lng:116.4},
+  {name:'Colombia',capital:'Bogotá',code:'co',lat:4.7,lng:-74.1},
+  {name:'Congo',capital:'Brazzaville',code:'cg',lat:-4.3,lng:15.3},
+  {name:'Costa Rica',capital:'San José',code:'cr',lat:9.9,lng:-84.1},
+  {name:'Croatia',capital:'Zagreb',code:'hr',lat:45.8,lng:15.9},
+  {name:'Cuba',capital:'Havana',code:'cu',lat:23.1,lng:-82.4},
+  {name:'Czechia',capital:'Prague',code:'cz',lat:50.1,lng:14.4},
+  {name:'Denmark',capital:'Copenhagen',code:'dk',lat:55.7,lng:12.6},
+  {name:'Dominican Republic',capital:'Santo Domingo',code:'do',lat:18.5,lng:-69.9},
+  {name:'Ecuador',capital:'Quito',code:'ec',lat:-0.2,lng:-78.5},
+  {name:'Egypt',capital:'Cairo',code:'eg',lat:30.0,lng:31.2},
+  {name:'El Salvador',capital:'San Salvador',code:'sv',lat:13.7,lng:-89.2},
+  {name:'Eritrea',capital:'Asmara',code:'er',lat:15.3,lng:38.9},
+  {name:'Estonia',capital:'Tallinn',code:'ee',lat:59.4,lng:24.8},
+  {name:'Ethiopia',capital:'Addis Ababa',code:'et',lat:9.0,lng:38.8},
+  {name:'Finland',capital:'Helsinki',code:'fi',lat:60.2,lng:24.9},
+  {name:'France',capital:'Paris',code:'fr',lat:48.9,lng:2.3},
+  {name:'Gabon',capital:'Libreville',code:'ga',lat:0.4,lng:9.5},
+  {name:'Georgia',capital:'Tbilisi',code:'ge',lat:41.7,lng:44.8},
+  {name:'Germany',capital:'Berlin',code:'de',lat:52.5,lng:13.4},
+  {name:'Ghana',capital:'Accra',code:'gh',lat:5.6,lng:-0.2},
+  {name:'Greece',capital:'Athens',code:'gr',lat:37.9,lng:23.7},
+  {name:'Guatemala',capital:'Guatemala City',code:'gt',lat:14.6,lng:-90.5},
+  {name:'Guinea',capital:'Conakry',code:'gn',lat:9.5,lng:-13.7},
+  {name:'Haiti',capital:'Port-au-Prince',code:'ht',lat:18.5,lng:-72.3},
+  {name:'Honduras',capital:'Tegucigalpa',code:'hn',lat:14.1,lng:-87.2},
+  {name:'Hungary',capital:'Budapest',code:'hu',lat:47.5,lng:19.0},
+  {name:'Iceland',capital:'Reykjavík',code:'is',lat:64.1,lng:-21.9},
+  {name:'India',capital:'New Delhi',code:'in',lat:28.6,lng:77.2},
+  {name:'Indonesia',capital:'Jakarta',code:'id',lat:-6.2,lng:106.8},
+  {name:'Iran',capital:'Tehran',code:'ir',lat:35.7,lng:51.4},
+  {name:'Iraq',capital:'Baghdad',code:'iq',lat:33.3,lng:44.4},
+  {name:'Ireland',capital:'Dublin',code:'ie',lat:53.3,lng:-6.3},
+  {name:'Israel',capital:'Jerusalem',code:'il',lat:31.8,lng:35.2},
+  {name:'Italy',capital:'Rome',code:'it',lat:41.9,lng:12.5},
+  {name:'Ivory Coast',capital:'Yamoussoukro',code:'ci',lat:6.8,lng:-5.3},
+  {name:'Japan',capital:'Tokyo',code:'jp',lat:35.7,lng:139.8},
+  {name:'Jordan',capital:'Amman',code:'jo',lat:31.9,lng:35.9},
+  {name:'Kazakhstan',capital:'Astana',code:'kz',lat:51.2,lng:71.4},
+  {name:'Kenya',capital:'Nairobi',code:'ke',lat:-1.3,lng:36.8},
+  {name:'Kuwait',capital:'Kuwait City',code:'kw',lat:29.4,lng:47.9},
+  {name:'Kyrgyzstan',capital:'Bishkek',code:'kg',lat:42.9,lng:74.6},
+  {name:'Laos',capital:'Vientiane',code:'la',lat:17.9,lng:102.6},
+  {name:'Latvia',capital:'Riga',code:'lv',lat:56.9,lng:24.1},
+  {name:'Lebanon',capital:'Beirut',code:'lb',lat:33.9,lng:35.5},
+  {name:'Liberia',capital:'Monrovia',code:'lr',lat:6.3,lng:-10.8},
+  {name:'Libya',capital:'Tripoli',code:'ly',lat:32.9,lng:13.2},
+  {name:'Lithuania',capital:'Vilnius',code:'lt',lat:54.7,lng:25.3},
+  {name:'Madagascar',capital:'Antananarivo',code:'mg',lat:-18.9,lng:47.5},
+  {name:'Malawi',capital:'Lilongwe',code:'mw',lat:-13.9,lng:33.8},
+  {name:'Malaysia',capital:'Kuala Lumpur',code:'my',lat:3.1,lng:101.7},
+  {name:'Mali',capital:'Bamako',code:'ml',lat:12.6,lng:-8.0},
+  {name:'Mauritania',capital:'Nouakchott',code:'mr',lat:18.1,lng:-15.9},
+  {name:'Mexico',capital:'Mexico City',code:'mx',lat:19.4,lng:-99.1},
+  {name:'Moldova',capital:'Chișinău',code:'md',lat:47.0,lng:28.9},
+  {name:'Mongolia',capital:'Ulaanbaatar',code:'mn',lat:47.9,lng:106.9},
+  {name:'Morocco',capital:'Rabat',code:'ma',lat:34.0,lng:-6.8},
+  {name:'Mozambique',capital:'Maputo',code:'mz',lat:-25.9,lng:32.6},
+  {name:'Myanmar',capital:'Naypyidaw',code:'mm',lat:16.8,lng:96.2},
+  {name:'Namibia',capital:'Windhoek',code:'na',lat:-22.6,lng:17.1},
+  {name:'Nepal',capital:'Kathmandu',code:'np',lat:27.7,lng:85.3},
+  {name:'Netherlands',capital:'Amsterdam',code:'nl',lat:52.4,lng:4.9},
+  {name:'New Zealand',capital:'Wellington',code:'nz',lat:-41.3,lng:174.8},
+  {name:'Nicaragua',capital:'Managua',code:'ni',lat:12.1,lng:-86.3},
+  {name:'Niger',capital:'Niamey',code:'ne',lat:13.5,lng:2.1},
+  {name:'Nigeria',capital:'Abuja',code:'ng',lat:9.1,lng:7.5},
+  {name:'North Korea',capital:'Pyongyang',code:'kp',lat:39.0,lng:125.8},
+  {name:'North Macedonia',capital:'Skopje',code:'mk',lat:42.0,lng:21.4},
+  {name:'Norway',capital:'Oslo',code:'no',lat:59.9,lng:10.7},
+  {name:'Oman',capital:'Muscat',code:'om',lat:23.6,lng:58.6},
+  {name:'Pakistan',capital:'Islamabad',code:'pk',lat:33.7,lng:73.1},
+  {name:'Panama',capital:'Panama City',code:'pa',lat:8.9,lng:-79.5},
+  {name:'Papua New Guinea',capital:'Port Moresby',code:'pg',lat:-9.5,lng:147.2},
+  {name:'Paraguay',capital:'Asunción',code:'py',lat:-25.3,lng:-57.6},
+  {name:'Peru',capital:'Lima',code:'pe',lat:-12.0,lng:-77.0},
+  {name:'Philippines',capital:'Manila',code:'ph',lat:14.6,lng:121.0},
+  {name:'Poland',capital:'Warsaw',code:'pl',lat:52.2,lng:21.0},
+  {name:'Portugal',capital:'Lisbon',code:'pt',lat:38.7,lng:-9.1},
+  {name:'Romania',capital:'Bucharest',code:'ro',lat:44.4,lng:26.1},
+  {name:'Russia',capital:'Moscow',code:'ru',lat:55.8,lng:37.6},
+  {name:'Rwanda',capital:'Kigali',code:'rw',lat:-1.9,lng:30.1},
+  {name:'Saudi Arabia',capital:'Riyadh',code:'sa',lat:24.7,lng:46.7},
+  {name:'Senegal',capital:'Dakar',code:'sn',lat:14.7,lng:-17.4},
+  {name:'Serbia',capital:'Belgrade',code:'rs',lat:44.8,lng:20.5},
+  {name:'Sierra Leone',capital:'Freetown',code:'sl',lat:8.5,lng:-13.2},
+  {name:'Slovakia',capital:'Bratislava',code:'sk',lat:48.1,lng:17.1},
+  {name:'Slovenia',capital:'Ljubljana',code:'si',lat:46.1,lng:14.5},
+  {name:'Somalia',capital:'Mogadishu',code:'so',lat:2.0,lng:45.3},
+  {name:'South Africa',capital:'Pretoria',code:'za',lat:-25.7,lng:28.2},
+  {name:'South Korea',capital:'Seoul',code:'kr',lat:37.6,lng:126.9},
+  {name:'South Sudan',capital:'Juba',code:'ss',lat:4.9,lng:31.6},
+  {name:'Spain',capital:'Madrid',code:'es',lat:40.4,lng:-3.7},
+  {name:'Sri Lanka',capital:'Sri Jayawardenepura Kotte',code:'lk',lat:6.9,lng:79.9},
+  {name:'Sudan',capital:'Khartoum',code:'sd',lat:15.5,lng:32.5},
+  {name:'Sweden',capital:'Stockholm',code:'se',lat:59.3,lng:18.1},
+  {name:'Switzerland',capital:'Bern',code:'ch',lat:46.9,lng:7.4},
+  {name:'Syria',capital:'Damascus',code:'sy',lat:33.5,lng:36.3},
+  {name:'Taiwan',capital:'Taipei',code:'tw',lat:25.0,lng:121.5},
+  {name:'Tajikistan',capital:'Dushanbe',code:'tj',lat:38.6,lng:68.8},
+  {name:'Tanzania',capital:'Dodoma',code:'tz',lat:-6.2,lng:35.7},
+  {name:'Thailand',capital:'Bangkok',code:'th',lat:13.8,lng:100.5},
+  {name:'Togo',capital:'Lomé',code:'tg',lat:6.1,lng:1.2},
+  {name:'Tunisia',capital:'Tunis',code:'tn',lat:36.8,lng:10.2},
+  {name:'Turkey',capital:'Ankara',code:'tr',lat:39.9,lng:32.9},
+  {name:'Turkmenistan',capital:'Ashgabat',code:'tm',lat:37.9,lng:58.4},
+  {name:'Uganda',capital:'Kampala',code:'ug',lat:0.3,lng:32.6},
+  {name:'Ukraine',capital:'Kyiv',code:'ua',lat:50.5,lng:30.5},
+  {name:'United Arab Emirates',capital:'Abu Dhabi',code:'ae',lat:24.5,lng:54.4},
+  {name:'United Kingdom',capital:'London',code:'gb',lat:51.5,lng:-0.1},
+  {name:'United States',capital:'Washington, D.C.',code:'us',lat:38.9,lng:-77.0},
+  {name:'Uruguay',capital:'Montevideo',code:'uy',lat:-34.9,lng:-56.2},
+  {name:'Uzbekistan',capital:'Tashkent',code:'uz',lat:41.3,lng:69.2},
+  {name:'Venezuela',capital:'Caracas',code:'ve',lat:10.5,lng:-66.9},
+  {name:'Vietnam',capital:'Hanoi',code:'vn',lat:21.0,lng:105.9},
+  {name:'Yemen',capital:"Sana'a",code:'ye',lat:15.4,lng:44.2},
+  {name:'Zambia',capital:'Lusaka',code:'zm',lat:-15.4,lng:28.3},
+  {name:'Zimbabwe',capital:'Harare',code:'zw',lat:-17.8,lng:31.0}
+];
+
+const ALIAS = {
+  usa:'united states',us:'united states',america:'united states','united states of america':'united states',
+  uk:'united kingdom',england:'united kingdom',scotland:'united kingdom',wales:'united kingdom','great britain':'united kingdom',
+  'czech republic':'czechia',holland:'netherlands',turkiye:'turkey',"cote d'ivoire":'ivory coast',
+  'uae':'united arab emirates',bosnia:'bosnia and herzegovina',macedonia:'north macedonia',
+  'washington':'washington dc','washington dc':'washington dc','washington d.c.':'washington dc',
+  'new delhi':'new delhi','delhi':'new delhi','brasilia':'brasília','brasilia':'brasília',
+  'kiev':'kyiv','peking':'beijing','bombay':'mumbai'
+};
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/^the /,'').trim();
+
+function isRightCountry(g, c){
+  g = norm(g); g = ALIAS[g] || g;
+  return g && (g === norm(c.name) || g === norm(c.name.replace(/ and /g,' ')));
+}
+function isRightCapital(g, c){
+  g = norm(g); g = ALIAS[g] || g;
+  const capital = norm(c.capital);
+  return g && (g === capital || g === capital.replace(/,/g,'') || capital.includes(g) && g.length > 3);
+}
+
+/* ---------- game ---------- */
+let map, marker, rounds, r, score, left, tick, cur;
+
+function initMap(){
+  if (map) return;
+  map = L.map('map', {
+    center: [20, 0], zoom: 2, minZoom: 2, maxZoom: 12, worldCopyJump: true, zoomControl: true
+  });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 20
+  }).addTo(map);
+}
+
+function placePin(c){
+  if (marker) map.removeLayer(marker);
+  const lat = c.lat + (Math.random() - 0.5) * 0.8;
+  const lng = c.lng + (Math.random() - 0.5) * 0.8;
+  marker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="font-size:28px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6));">📍</div>',
+      iconSize: [28, 28], iconAnchor: [14, 28]
+    })
+  }).addTo(map);
+  map.setView([lat, lng], 5 + Math.floor(Math.random() * 2));
+}
+
+function showFlag(c){
+  $('flagImg').src = `https://flagcdn.com/w640/${c.code}.png`;
+  $('flagImg').alt = c.name + ' flag';
+}
+
+function startGame(m){
+  mode = m;
+  rounds = []; r = 0; score = 0;
+  show('game');
+  if (mode === 'map') {
+    $('map').style.display = 'block';
+    $('flagArea').style.display = 'none';
+    $('hint').style.display = 'block';
+    $('hint').textContent = '📍 Pin is fixed — drag & scroll the map (no names shown)';
+    $('guess').placeholder = 'Type the country…';
+    initMap();
+    setTimeout(() => { map.invalidateSize(); nextRound(); }, 60);
+  } else {
+    $('map').style.display = 'none';
+    $('flagArea').style.display = 'flex';
+    $('hint').style.display = 'block';
+    $('hint').textContent = '🏳️ Look at the flag — type the capital city';
+    $('guess').placeholder = 'Type the capital…';
+    nextRound();
+  }
+}
+
+$('startMap').onclick = () => startGame('map');
+$('startCapitals').onclick = () => startGame('capitals');
+$('again').onclick = () => startGame(mode);
+
+function nextRound(){
+  r++;
+  $('over').classList.remove('on');
+  $('guess').value = '';
+  $('guess').disabled = $('send').disabled = false;
+  $('rnd').textContent = `Round ${r} / 5`;
+  $('pts').textContent = `Points: ${score}`;
+  cur = COUNTRIES[Math.floor(Math.random() * COUNTRIES.length)];
+  if (mode === 'map') placePin(cur);
+  else showFlag(cur);
+  $('guess').focus();
+  left = 120;
+  draw();
+  clearInterval(tick);
+  tick = setInterval(() => { left--; draw(); if (left <= 0) submit(true); }, 1000);
+}
+
+function draw(){
+  $('time').textContent = Math.floor(left/60) + ':' + String(left%60).padStart(2,'0');
+  $('time').className = left <= 20 ? 'low' : '';
+}
+
+function submit(timeout){
+  clearInterval(tick);
+  const g = timeout === true ? '' : $('guess').value.trim();
+  if (!g && timeout !== true) {
+    tick = setInterval(() => { left--; draw(); if (left <= 0) submit(true); }, 1000);
+    return;
+  }
+  const ok = mode === 'map' ? isRightCountry(g, cur) : isRightCapital(g, cur);
+  if (ok) score++;
+  const answer = mode === 'map' ? cur.name : cur.capital;
+  rounds.push({country: cur.name, capital: cur.capital, guess: g || '(no answer)', ok, secs: 120 - left, mode});
+  $('pts').textContent = `Points: ${score}`;
+  $('overMsg').innerHTML = `<h2 class="${ok ? 'ok' : 'no'}">${ok ? 'Correct! +1 point' : (g ? 'Not this time' : 'Time is up')}</h2>
+    <p>${mode === 'map' ? 'Country' : 'Capital'} was <b style="color:var(--text)">${esc(answer)}</b>
+    ${mode === 'capitals' ? ` (${esc(cur.name)})` : ''}${ok ? '' : ` · you wrote ${esc(rounds.at(-1).guess)}`}</p>`;
+  $('next').textContent = r >= 5 ? 'See results' : 'Next round';
+  $('over').classList.add('on');
+}
+$('send').onclick = () => submit();
+$('guess').onkeydown = e => { if (e.key === 'Enter') submit(); };
+
+$('next').onclick = async () => {
+  if (r < 5) return nextRound();
+  $('fin').textContent = score;
+  $('sum').innerHTML = rounds.map((x, i) =>
+    `<li><span><b>Round ${i+1}: ${esc(mode === 'map' ? x.country : x.capital)}</b>
+     <small>${mode === 'capitals' ? esc(x.country)+' · ' : ''}You wrote: ${esc(x.guess)} · ${x.secs}s</small></span>
+     <span class="mark ${x.ok ? 'ok' : 'no'}">${x.ok ? 'Right' : 'Wrong'}</span></li>`).join('');
+  show('end');
+  try { await api('games', {rounds, mode}); } catch(e){}
+};
+</script>
+</body>
+</html>
